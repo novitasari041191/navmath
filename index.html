@@ -1257,7 +1257,7 @@
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
-        <button onclick="if(confirm('Logout dosen?')){V7.setDosen(false);V7.saveUser(null);location.reload()}" style="padding:7px 14px;background:rgba(255,68,68,0.08);border:1px solid rgba(255,68,68,0.2);border-radius:10px;color:var(--danger);font-size:11px;cursor:pointer;font-family:'Exo 2',sans-serif;transition:all 0.2s;" onmouseover="this.style.background='rgba(255,68,68,0.18)'" onmouseout="this.style.background='rgba(255,68,68,0.08)'">🚪 Logout</button>
+        <button onclick="if(confirm('Logout dosen?')){V7.logDosenLogout();V7.setDosen(false);V7.saveUser(null);location.reload()}" style="padding:7px 14px;background:rgba(255,68,68,0.08);border:1px solid rgba(255,68,68,0.2);border-radius:10px;color:var(--danger);font-size:11px;cursor:pointer;font-family:'Exo 2',sans-serif;transition:all 0.2s;" onmouseover="this.style.background='rgba(255,68,68,0.18)'" onmouseout="this.style.background='rgba(255,68,68,0.08)'">🚪 Logout</button>
         <button onclick="closeDosen()" style="width:36px;height:36px;border:1px solid rgba(255,68,68,0.4);border-radius:50%;background:rgba(255,68,68,0.1);color:var(--danger);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;" onmouseover="this.style.background='var(--danger);color:white'" onmouseout="this.style.background='rgba(255,68,68,0.1)'">✕</button>
       </div>
     </div>
@@ -10416,6 +10416,9 @@ const V7 = {
   // Sheet 5: VOYAGE_LOG    → pushVoyageLog()
   GAS_URL: 'https://script.google.com/macros/s/AKfycbxgIcV1Nn_ZdqPKiQwrRizQE1UVOTvmRCFZpkME6oBmOhbBkjvmCA79OgFrksi3uTYN/exec',
   QUEUE_KEY: 'navmath_send_queue',
+  // [FIX-DOSEN-1] Nama sheet LOG_DOSEN — harus sama persis dengan GAS v4
+  // (gunakan sebagai const di sini agar mudah diganti jika perlu)
+  get SHEET_DOSEN_NAME() { return 'LOG_DOSEN'; },
 
   // Timestamp WIB (UTC+7) agar mudah dibaca dosen
   nowWIB() {
@@ -10574,6 +10577,49 @@ const V7 = {
     });
   },
   // ─────────────────────────────────────────────────────────
+
+  // [FIX-DOSEN-1] Catat login/logout dosen ke sheet LOG_DOSEN
+  // Bypass validatePayload karena NIT 'dosen' sengaja diblokir di validatePayload
+  logDosenLogin(kodeSesi) {
+    const payload = {
+      Timestamp: this.nowWIB(),
+      Role:      'dosen',
+      Nama:      'Dosen',
+      KodeSesi:  kodeSesi || '-',
+      Action:    'login',
+      UserAgent: (navigator.userAgent || '').substring(0, 120)
+    };
+    // Kirim langsung tanpa validatePayload — sheet LOG_DOSEN diizinkan bypass di GAS
+    if (navigator.onLine) {
+      this._doFetch('LOG_DOSEN', payload).then(ok => {
+        if (!ok) this._enqueueDosenLog(payload);
+      });
+    } else {
+      this._enqueueDosenLog(payload);
+    }
+  },
+
+  logDosenLogout() {
+    const payload = {
+      Timestamp: this.nowWIB(),
+      Role:      'dosen',
+      Nama:      'Dosen',
+      KodeSesi:  this.getSesi() || '-',
+      Action:    'logout',
+      UserAgent: (navigator.userAgent || '').substring(0, 120)
+    };
+    if (navigator.onLine) {
+      this._doFetch('LOG_DOSEN', payload);
+    }
+  },
+
+  _enqueueDosenLog(data) {
+    const q = this.getQueue();
+    q.push({ sheet: 'LOG_DOSEN', data, addedAt: Date.now() });
+    if (q.length > 200) q.splice(0, q.length - 200);
+    this.saveQueue(q);
+    console.warn('[NavMath] Dosen log offline — masuk antrian:', data.Action);
+  },
 
   // All registered taruna (unique NIT from session logs)
   // Auto-flush queue saat kembali online
@@ -10959,6 +11005,9 @@ function doLoginDosen() {
   V7.setDosen(true);
   V7.saveUser({ nit: 'dosen', nama: 'Dosen', angkatan: '-', kelas: '-' });
 
+  // [FIX-DOSEN-1] Catat login dosen ke sheet LOG_DOSEN
+  V7.logDosenLogin(sesi);
+
   // Reset gameState — dosen tidak punya XP/modul pribadi
   gameState.xp = 0;
   gameState.completedModules = [];
@@ -11017,7 +11066,7 @@ function showUserInfo() {
         </div>
       </div>
       <button onclick="openDosenPanel();document.getElementById('user-info-modal')?.remove()" style="width:100%;padding:9px 14px;background:rgba(255,179,0,0.1);border:1px solid rgba(255,179,0,0.25);border-radius:10px;color:var(--amber);font-family:'Exo 2',sans-serif;font-size:12px;font-weight:600;cursor:pointer;text-align:left;margin-bottom:8px;transition:all 0.2s;" onmouseover="this.style.background='rgba(255,179,0,0.18)'" onmouseout="this.style.background='rgba(255,179,0,0.1)'">📋 Buka Panel Dosen</button>
-      <button onclick="V7.setDosen(false);V7.saveUser(null);location.reload()" style="width:100%;padding:9px 14px;background:rgba(255,68,68,0.07);border:1px solid rgba(255,68,68,0.2);border-radius:10px;color:var(--danger);font-family:'Exo 2',sans-serif;font-size:12px;font-weight:600;cursor:pointer;text-align:left;transition:all 0.2s;" onmouseover="this.style.background='rgba(255,68,68,0.15)'" onmouseout="this.style.background='rgba(255,68,68,0.07)'">🚪 Logout Dosen</button>
+      <button onclick="V7.logDosenLogout();V7.setDosen(false);V7.saveUser(null);location.reload()" style="width:100%;padding:9px 14px;background:rgba(255,68,68,0.07);border:1px solid rgba(255,68,68,0.2);border-radius:10px;color:var(--danger);font-family:'Exo 2',sans-serif;font-size:12px;font-weight:600;cursor:pointer;text-align:left;transition:all 0.2s;" onmouseover="this.style.background='rgba(255,68,68,0.15)'" onmouseout="this.style.background='rgba(255,68,68,0.07)'">🚪 Logout Dosen</button>
     `;
   } else {
     const rankName = RANKS[getCurrentRank()].name;
